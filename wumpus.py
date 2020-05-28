@@ -1,8 +1,10 @@
 from discord.ext import commands
+import discord
 import asyncpg
 import asyncio
 import config
 from random import random
+import logging
 
 #NOTE: USING PARENTS [SELECT (x,y,z) FROM...] RETURNS A TUPLE INSTEAD OF WHAT I WANT.
 #I DON'T EVEN KNOW ANYMORE
@@ -88,15 +90,14 @@ def getuserid(message, ctx):
     return str(message.author.id) + str(ctx.guild.id)
 
 @commands.command()
+@commands.is_owner()
 async def build(ctx):
-    for channel in ctx.guild.text_channels: #TESTING - REMOVE [1]
+    for channel in ctx.guild.text_channels:
         after = None
         while True:
             async for message in channel.history(limit=100,after=after,oldest_first=True):
                 words = message.clean_content.split()
                 userid = getuserid(message, channel)
-                #insert the first word of the message
-                print(f"words[{len(words)}]")
                 if len(words) < 1:
                     continue
                 await ctx.bot.db_start_insert.fetch(userid,words[0])
@@ -104,17 +105,18 @@ async def build(ctx):
                 for (index, word) in enumerate(words[:-1]):
                     await ctx.bot.db_word_insert.fetch(userid,word,words[index+1])
                 after = message
-            #break #TESTING
+            await ctx.bot.db_progress.fetch(channel.id, after.id) 
+            logger.debug(f"Processed message at {after.created_at.isoformat(timespec='seconds')} in channel {after.channel.name}.")
             if after.id == channel.last_message_id:
                 break
-            await ctx.send(f"Made it to {after.clean_content}")
-            await ctx.bot.db_progress.fetch(channel.id, after.id)
-        await ctx.bot.db.execute("UPDATE progress SET message_id=0 WHERE channel_id=$1",channel.id)
+            #await ctx.send(f"Made it to {after.clean_content}")
+        logger.debug(f"{channel.name} complete.")
+    logger.debug(f"{ctx.guild.name} complete.")
+        #await ctx.bot.db.execute("UPDATE progress SET message_id=0 WHERE channel_id=$1",channel.id)
 
 def pick(l):
     total_count = 0
     for i in l:
-        print(f"i:{dict(i)}")
         total_count += i["count"]
     location = random() * total_count
     progress = 0
@@ -124,13 +126,18 @@ def pick(l):
             return j
 
 @commands.command()
-async def speak(ctx):
-    userid = getuserid(ctx,ctx)
+async def speak(ctx, member:discord.Member = None):
+    if member == None:
+        member = ctx.author
+    userid = str(member.id) + str(ctx.guild.id)
     starts = await ctx.bot.db.fetch("""
         select after, count from words
         where id=$1
         and special='START';
     """,userid)
+    if not starts:
+        await ctx.send("No records for this user.")
+        return
     m = [pick(starts)["after"]]
     c = 0
     while True:
@@ -141,6 +148,16 @@ async def speak(ctx):
         c += 1
     await ctx.send(" ".join(m))
 
+@speak.error
+async def speak_error(ctx,error):
+    if isinstance(error, commands.BadArgument):
+        await ctx.send("Cannot parse that member.")
+    else:
+        raise error
 
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+logger.addHandler(logging.FileHandler("wumpus.log"))
+#logging.basicConfig(filename="wumpus.log",level=logging.DEBUG,format="%(asctime)s: %(message)s")
 loop = asyncio.get_event_loop()
 loop.run_until_complete(run(config.token))
