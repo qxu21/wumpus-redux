@@ -9,6 +9,8 @@ import logging
 #NOTE: USING PARENTS [SELECT (x,y,z) FROM...] RETURNS A TUPLE INSTEAD OF WHAT I WANT.
 #I DON'T EVEN KNOW ANYMORE
 
+#TODO: continuous updating
+
 class Wumpus(commands.Bot):
     def __init__(self, db, preps):
         super().__init__(
@@ -93,7 +95,14 @@ def getuserid(message, ctx):
 @commands.is_owner()
 async def build(ctx):
     for channel in ctx.guild.text_channels:
-        after = None
+        afterid = await ctx.bot.db.fetchval("SELECT message_id FROM progress WHERE guild_id=$1;",ctx.guild.id)
+        if afterid is not None:
+            try:
+                after = await ctx.fetch_message(afterid)
+            except:
+                after = None
+        else:
+            after = None
         while True:
             async for message in channel.history(limit=100,after=after,oldest_first=True):
                 words = message.clean_content.split()
@@ -110,8 +119,8 @@ async def build(ctx):
             if after.id == channel.last_message_id:
                 break
             #await ctx.send(f"Made it to {after.clean_content}")
-        logger.debug(f"{channel.name} complete.")
-    logger.debug(f"{ctx.guild.name} complete.")
+        logger.debug(f"Channel #{channel.name} complete.")
+    logger.debug(f"Guild {ctx.guild.name} complete.")
         #await ctx.bot.db.execute("UPDATE progress SET message_id=0 WHERE channel_id=$1",channel.id)
 
 def pick(l):
@@ -157,7 +166,9 @@ async def speak_error(ctx,error):
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
-logger.addHandler(logging.FileHandler("wumpus.log"))
+handler = logging.FileHandler("wumpus.log")
+handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s"))
+logger.addHandler(handler)
 #logging.basicConfig(filename="wumpus.log",level=logging.DEBUG,format="%(asctime)s: %(message)s")
 loop = asyncio.get_event_loop()
 loop.run_until_complete(run(config.token))
