@@ -6,10 +6,13 @@ import config
 from random import random
 import logging
 
-#NOTE: USING PARENTS [SELECT (x,y,z) FROM...] RETURNS A TUPLE INSTEAD OF WHAT I WANT.
+#NOTE: USING PARENS [SELECT (x,y,z) FROM...] RETURNS A TUPLE INSTEAD OF WHAT I WANT.
 #I DON'T EVEN KNOW ANYMORE
 
 #TODO: continuous updating
+#nonblocking wspeaks? that or purposefully block wspeaks, to vore the race condition
+#crunch whole db into one user to emulate servers
+#don't yell the console every time a command doesn't show
 
 class Wumpus(commands.Bot):
     def __init__(self, db, preps):
@@ -94,17 +97,18 @@ def getuserid(message, ctx):
 @commands.command()
 @commands.is_owner()
 async def build(ctx):
-    for channel in ctx.guild.text_channels:
-        afterid = await ctx.bot.db.fetchval("SELECT message_id FROM progress WHERE guild_id=$1;",ctx.guild.id)
+    for channel in ctx.guild.text_channels: #BUG: accesses inaccesible channels
+        afterid = await ctx.bot.db.fetchval("SELECT message_id FROM progress WHERE channel_id=$1;",channel.id)
         if afterid is not None:
             try:
-                after = await ctx.fetch_message(afterid)
+                after = await channel.fetch_message(afterid) #bug caused by having this as ctx
             except:
                 after = None
         else:
             after = None
         while True:
-            async for message in channel.history(limit=100,after=after,oldest_first=True):
+            async for message in channel.history(limit=100,after=after,oldest_first=True): #BUG: I THINK AFTER CAN HANG AT THE LAST MSG
+                after = message #scope breaks if i deindent
                 words = message.clean_content.split()
                 userid = getuserid(message, channel)
                 if len(words) < 1:
@@ -113,15 +117,12 @@ async def build(ctx):
                 await ctx.bot.db_end_insert.fetch(userid,words[-1])
                 for (index, word) in enumerate(words[:-1]):
                     await ctx.bot.db_word_insert.fetch(userid,word,words[index+1])
-                after = message
             await ctx.bot.db_progress.fetch(channel.id, after.id) 
-            logger.debug(f"Processed message at {after.created_at.isoformat(timespec='seconds')} in channel {after.channel.name}.")
-            if after.id == channel.last_message_id:
+            logger.debug(f"Processed message at {after.created_at.isoformat(timespec='seconds')} in channel {after.channel.name}.") #may not be the same as channel
+            if after.id == channel.last_message_id: #PATCH TO TIMESTAMP?
                 break
-            #await ctx.send(f"Made it to {after.clean_content}")
         logger.debug(f"Channel #{channel.name} complete.")
     logger.debug(f"Guild {ctx.guild.name} complete.")
-        #await ctx.bot.db.execute("UPDATE progress SET message_id=0 WHERE channel_id=$1",channel.id)
 
 def pick(l):
     total_count = 0
@@ -135,7 +136,7 @@ def pick(l):
             return j
 
 @commands.command()
-async def speak(ctx, member:discord.Member = None):
+async def speak(ctx, member:discord.Member = None): #FIX PARSING - ALLOW SPACES
     if member == None:
         member = ctx.author
     userid = str(member.id) + str(ctx.guild.id)
