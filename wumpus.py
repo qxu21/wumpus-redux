@@ -5,6 +5,7 @@ import asyncio
 import config
 from random import random
 import logging
+import sys
 
 #NOTE: USING PARENS [SELECT (x,y,z) FROM...] RETURNS A TUPLE INSTEAD OF WHAT I WANT.
 #I DON'T EVEN KNOW ANYMORE
@@ -13,6 +14,8 @@ import logging
 #nonblocking wspeaks? that or purposefully block wspeaks, to vore the race condition
 #crunch whole db into one user to emulate servers
 #don't yell the console every time a command doesn't show
+#separate users and IDs, probably
+#don't attack 
 
 class Wumpus(commands.Bot):
     def __init__(self, db, preps):
@@ -25,7 +28,15 @@ class Wumpus(commands.Bot):
 
         self.remove_command("help")
         self.add_command(build)
-        self.add_command(speak)
+        #self.add_command(speak)
+        self.add_command(erase)
+    
+    async def on_command_error(self,ctx,err):
+        try:
+            if not isinstance(err,discord.ext.commands.errors.CommandNotFound):
+                raise err
+        except:
+            raise
 
 async def run(token):
     db = await asyncpg.create_pool(**config.dbc) # formerly create_pool
@@ -47,6 +58,7 @@ async def run(token):
     await db.execute("""
         create table if not exists progress(
             channel_id bigint primary key,
+            guild_id bigint not null,
             message_id bigint not null
         );
     """)
@@ -71,10 +83,10 @@ async def run(token):
                 set count=words.count + 1;
             """),
             "db_progress": await conn.prepare("""
-                insert into progress (channel_id, message_id) values
-                ($1, $2)
+                insert into progress (channel_id, guild_id, message_id) values
+                ($1, $2, $3)
                 on conflict (channel_id) do update
-                set message_id=$2;
+                set message_id=$3;
             """),
             "db_fetch": await conn.prepare("""
                 select after,count,special from words
@@ -97,7 +109,11 @@ def getuserid(message, ctx):
 @commands.command()
 @commands.is_owner()
 async def build(ctx):
-    for channel in ctx.guild.text_channels: #BUG: accesses inaccesible channels
+    me = ctx.guild.get_member(475061072173334539) #ow my hardcoding
+    for channel in ctx.guild.text_channels:
+        perms = channel.permissions_for(me)
+        if not perms.read_messages or not perms.read_message_history:
+            continue
         afterid = await ctx.bot.db.fetchval("SELECT message_id FROM progress WHERE channel_id=$1;",channel.id)
         if afterid is not None:
             try:
@@ -107,7 +123,9 @@ async def build(ctx):
         else:
             after = None
         while True:
+            c = True
             async for message in channel.history(limit=100,after=after,oldest_first=True): #BUG: I THINK AFTER CAN HANG AT THE LAST MSG
+                c = False
                 after = message #scope breaks if i deindent
                 words = message.clean_content.split()
                 userid = getuserid(message, channel)
@@ -117,12 +135,24 @@ async def build(ctx):
                 await ctx.bot.db_end_insert.fetch(userid,words[-1])
                 for (index, word) in enumerate(words[:-1]):
                     await ctx.bot.db_word_insert.fetch(userid,word,words[index+1])
-            await ctx.bot.db_progress.fetch(channel.id, after.id) 
+            await ctx.bot.db_progress.fetch(channel.id, ctx.guild.id, after.id) 
             logger.debug(f"Processed message at {after.created_at.isoformat(timespec='seconds')} in channel {after.channel.name}.") #may not be the same as channel
-            if after.id == channel.last_message_id: #PATCH TO TIMESTAMP?
+            if c:
                 break
         logger.debug(f"Channel #{channel.name} complete.")
     logger.debug(f"Guild {ctx.guild.name} complete.")
+
+@commands.command()
+@commands.is_owner()
+async def erase(ctx):
+    for channel in ctx.guild.text_channels:
+        await ctx.bot.db.execute("DELETE FROM progress WHERE channel_id=$1;",channel.id)
+        logger.debug(f"Deleted progress of channel #{channel.name}")
+
+#@commands.command()
+#@commands.is_owner()
+#async def fetch(ctx,i):
+#    await ctx.send(ctx.guild.()).jump_url)
 
 def pick(l):
     total_count = 0

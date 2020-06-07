@@ -2,3 +2,4 @@ config.py
 python/
 __pycache__/
 *.log
+*.log.gz
