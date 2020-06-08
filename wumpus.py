@@ -128,9 +128,10 @@ async def build(ctx):
                 c = False
                 after = message #scope breaks if i deindent
                 words = message.clean_content.split()
-                userid = getuserid(message, channel)
+                userid = getuserid(message, channel) #why is this a null byte
                 if len(words) < 1:
                     continue
+                print(f"{message.id} - {userid} - {words[0]}")
                 await ctx.bot.db_start_insert.fetch(userid,words[0])
                 await ctx.bot.db_end_insert.fetch(userid,words[-1])
                 for (index, word) in enumerate(words[:-1]):
