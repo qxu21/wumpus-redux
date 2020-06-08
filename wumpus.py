@@ -9,6 +9,7 @@ import sys
 
 #NOTE: USING PARENS [SELECT (x,y,z) FROM...] RETURNS A TUPLE INSTEAD OF WHAT I WANT.
 #I DON'T EVEN KNOW ANYMORE
+#note 2: sometimes there are null bytes in discord messages. why? who knows.
 
 #TODO: continuous updating
 #nonblocking wspeaks? that or purposefully block wspeaks, to vore the race condition
@@ -30,6 +31,7 @@ class Wumpus(commands.Bot):
         self.add_command(build)
         #self.add_command(speak)
         self.add_command(erase)
+        self.add_command(fetch)
     
     async def on_command_error(self,ctx,err):
         try:
@@ -130,12 +132,13 @@ async def build(ctx):
             after = None
         while True:
             c = True
-            ctx.bot.db_begin.fetch()
+            await ctx.bot.db_begin.fetch()
             try:
-                async for message in channel.history(limit=100,after=after,oldest_first=True): #BUG: I THINK AFTER CAN HANG AT THE LAST MSG
+                async for message in channel.history(limit=100,after=after,oldest_first=True):
                     c = False
                     after = message #scope breaks if i deindent
-                    words = message.clean_content.split()
+                    #it took 24 hours to learn that i need to sanitize null bytes
+                    words = message.clean_content.replace("\u0000","").split()
                     userid = getuserid(message, channel)
                     if len(words) < 1:
                         continue
@@ -144,14 +147,13 @@ async def build(ctx):
                     for (index, word) in enumerate(words[:-1]):
                         await ctx.bot.db_word_insert.fetch(userid,word,words[index+1])
             except:
-                ctx.bot.db_rollback.fetch()
+                await ctx.bot.db_rollback.fetch()
                 raise
-            ctx.bot.db_commit.fetch()
+            await ctx.bot.db_commit.fetch()
             await ctx.bot.db_progress.fetch(channel.id, ctx.guild.id, after.id)
             logger.debug(
                 f"Processed message at {after.created_at.isoformat(timespec='seconds')} in channel {after.channel.name}."
             ) #may not be the same as channel
-
             if c:
                 break
         logger.debug(f"Channel #{channel.name} complete.")
@@ -163,10 +165,15 @@ async def erase(ctx):
         await ctx.bot.db.execute("DELETE FROM progress WHERE channel_id=$1;",channel.id)
         logger.debug(f"Deleted progress of channel #{channel.name}")
 
-#@commands.command()
-#@commands.is_owner()
-#async def fetch(ctx,i):
+@commands.command()
+@commands.is_owner()
+async def fetch(ctx):
+    await ctx.send("—\u0000—\u0000")
+#async def fetch(ctx,i:int,j:int):
 #    await ctx.send(ctx.guild.()).jump_url)
+#    m = await ctx.guild.get_channel(i).fetch_message(j)
+#    with open("m","w") as f:
+#        f.write(m.content)
 
 def pick(l):
     total_count = 0
