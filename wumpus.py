@@ -62,8 +62,12 @@ async def run(token):
             message_id bigint not null
         );
     """)
+
     async with db.acquire() as conn:
         preps = {
+            "db_begin": await conn.prepare("begin;"),
+            "db_rollback": await conn.prepare("rollback;"),
+            "db_commit": await conn.prepare("commit;"),
             "db_start_insert": await conn.prepare("""
                 insert into words (id, before, after, count, special) values
                 ($1, '__placeholder__', $2, 1, 'START')
@@ -106,10 +110,12 @@ async def run(token):
 def getuserid(message, ctx):
     return str(message.author.id) + str(ctx.guild.id)
 
+bot_id = 475061072173334539
+
 @commands.command()
 @commands.is_owner()
 async def build(ctx):
-    me = ctx.guild.get_member(475061072173334539) #ow my hardcoding
+    me = ctx.guild.get_member(bot_id)
     for channel in ctx.guild.text_channels:
         perms = channel.permissions_for(me)
         if not perms.read_messages or not perms.read_message_history:
@@ -124,25 +130,32 @@ async def build(ctx):
             after = None
         while True:
             c = True
-            async for message in channel.history(limit=100,after=after,oldest_first=True): #BUG: I THINK AFTER CAN HANG AT THE LAST MSG
-                c = False
-                after = message #scope breaks if i deindent
-                words = message.clean_content.split()
-                userid = getuserid(message, channel) #why is this a null byte
-                if len(words) < 1:
-                    continue
-                print(f"{message.id} - {userid} - {words[0]}")
-                await ctx.bot.db_start_insert.fetch(userid,words[0])
-                await ctx.bot.db_end_insert.fetch(userid,words[-1])
-                for (index, word) in enumerate(words[:-1]):
-                    await ctx.bot.db_word_insert.fetch(userid,word,words[index+1])
-            await ctx.bot.db_progress.fetch(channel.id, ctx.guild.id, after.id) 
-            logger.debug(f"Processed message at {after.created_at.isoformat(timespec='seconds')} in channel {after.channel.name}.") #may not be the same as channel
+            ctx.bot.db_begin.fetch()
+            try:
+                async for message in channel.history(limit=100,after=after,oldest_first=True): #BUG: I THINK AFTER CAN HANG AT THE LAST MSG
+                    c = False
+                    after = message #scope breaks if i deindent
+                    words = message.clean_content.split()
+                    userid = getuserid(message, channel)
+                    if len(words) < 1:
+                        continue
+                    await ctx.bot.db_start_insert.fetch(userid,words[0])
+                    await ctx.bot.db_end_insert.fetch(userid,words[-1])
+                    for (index, word) in enumerate(words[:-1]):
+                        await ctx.bot.db_word_insert.fetch(userid,word,words[index+1])
+            except:
+                ctx.bot.db_rollback.fetch()
+                raise
+            ctx.bot.db_commit.fetch()
+            await ctx.bot.db_progress.fetch(channel.id, ctx.guild.id, after.id)
+            logger.debug(
+                f"Processed message at {after.created_at.isoformat(timespec='seconds')} in channel {after.channel.name}."
+            ) #may not be the same as channel
+
             if c:
                 break
         logger.debug(f"Channel #{channel.name} complete.")
     logger.debug(f"Guild {ctx.guild.name} complete.")
-
 @commands.command()
 @commands.is_owner()
 async def erase(ctx):
