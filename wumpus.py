@@ -145,17 +145,17 @@ async def build(ctx):
                         await ctx.bot.db_word_insert.fetch(userid,word,words[index+1])
             except:
                 ctx.bot.db_rollback.fetch()
-                raise "Beaned"
+                raise
             ctx.bot.db_commit.fetch()
             await ctx.bot.db_progress.fetch(channel.id, ctx.guild.id, after.id)
             logger.debug(
                 f"Processed message at {after.created_at.isoformat(timespec='seconds')} in channel {after.channel.name}."
             ) #may not be the same as channel
+
             if c:
                 break
         logger.debug(f"Channel #{channel.name} complete.")
     logger.debug(f"Guild {ctx.guild.name} complete.")
-
 @commands.command()
 @commands.is_owner()
 async def erase(ctx):
