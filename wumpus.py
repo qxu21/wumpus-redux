@@ -29,9 +29,9 @@ class Wumpus(commands.Bot):
 
         self.remove_command("help")
         self.add_command(build)
-        #self.add_command(speak)
-        self.add_command(erase)
-        self.add_command(fetch)
+        self.add_command(speak)
+        #self.add_command(erase)
+        #self.add_command(fetch)
     
     async def on_command_error(self,ctx,err):
         try:
@@ -151,6 +151,7 @@ async def build(ctx):
                 raise
             await ctx.bot.db_commit.fetch()
             await ctx.bot.db_progress.fetch(channel.id, ctx.guild.id, after.id)
+            #TODO - don't log when after is the last message
             logger.debug(
                 f"Processed message at {after.created_at.isoformat(timespec='seconds')} in channel {after.channel.name}."
             ) #may not be the same as channel
