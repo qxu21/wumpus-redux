@@ -21,7 +21,7 @@ import sys
 class Wumpus(commands.Bot):
     def __init__(self, db, preps):
         super().__init__(
-            command_prefix="w"
+            command_prefix=("w","W")
         )
         self.db = db
         for (key, val) in preps.items():
